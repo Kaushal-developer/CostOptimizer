@@ -1,0 +1,164 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: costoptimizer-api
+  labels:
+    app: costoptimizer
+    component: api
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: costoptimizer
+      component: api
+  template:
+    metadata:
+      labels:
+        app: costoptimizer
+        component: api
+    spec:
+      containers:
+        - name: api
+          image: costoptimizer:latest
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - secretRef:
+                name: costoptimizer-secrets
+            - configMapRef:
+                name: costoptimizer-config
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: costoptimizer-worker
+  labels:
+    app: costoptimizer
+    component: worker
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: costoptimizer
+      component: worker
+  template:
+    metadata:
+      labels:
+        app: costoptimizer
+        component: worker
+    spec:
+      containers:
+        - name: worker
+          image: costoptimizer:latest
+          command: ["celery", "-A", "src.workers.celery_app", "worker", "--loglevel=info", "-c", "4"]
+          envFrom:
+            - secretRef:
+                name: costoptimizer-secrets
+            - configMapRef:
+                name: costoptimizer-config
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: costoptimizer-beat
+  labels:
+    app: costoptimizer
+    component: beat
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: costoptimizer
+      component: beat
+  template:
+    metadata:
+      labels:
+        app: costoptimizer
+        component: beat
+    spec:
+      containers:
+        - name: beat
+          image: costoptimizer:latest
+          command: ["celery", "-A", "src.workers.celery_app", "beat", "--loglevel=info"]
+          envFrom:
+            - secretRef:
+                name: costoptimizer-secrets
+            - configMapRef:
+                name: costoptimizer-config
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 250m
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: costoptimizer-api
+spec:
+  selector:
+    app: costoptimizer
+    component: api
+  ports:
+    - port: 80
+      targetPort: 8000
+  type: ClusterIP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: costoptimizer-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - app.costoptimizer.io
+      secretName: costoptimizer-tls
+  rules:
+    - host: app.costoptimizer.io
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: costoptimizer-api
+                port:
+                  number: 80
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: costoptimizer-frontend
+                port:
+                  number: 80
