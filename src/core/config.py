@@ -10,8 +10,8 @@ class Settings(BaseSettings):
     secret_key: str = "change-me-in-production"
     api_prefix: str = "/api/v1"
 
-    # Database (default SQLite for local dev — no Postgres needed)
-    database_url: str = "sqlite+aiosqlite:///./costoptimizer.db"
+    # Database
+    database_url: str = "postgresql+asyncpg://costopt:costopt@localhost:5432/costoptimizer"
     database_pool_size: int = 5
     database_max_overflow: int = 5
 
