@@ -58,9 +58,10 @@ preflight() {
 setup_database() {
     info "Setting up PostgreSQL database..."
 
-    # Check if role exists
+    # Create or update role with the generated password
     if sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='${DB_USER}'" | grep -q 1; then
-        info "Database role '${DB_USER}' already exists"
+        sudo -u postgres psql -c "ALTER ROLE ${DB_USER} WITH LOGIN PASSWORD '${DB_PASS}';"
+        info "Database role '${DB_USER}' updated with new password"
     else
         sudo -u postgres psql -c "CREATE ROLE ${DB_USER} WITH LOGIN PASSWORD '${DB_PASS}';"
         info "Created database role '${DB_USER}'"
@@ -75,6 +76,40 @@ setup_database() {
     fi
 
     sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};"
+
+    # Ensure schema permissions
+    sudo -u postgres psql -d "${DB_NAME}" -c "GRANT ALL ON SCHEMA public TO ${DB_USER};"
+
+    # Configure pg_hba.conf for password auth (local + network)
+    PG_HBA=$(sudo -u postgres psql -tAc "SHOW hba_file")
+    PG_HBA=$(echo "$PG_HBA" | xargs)  # trim whitespace
+
+    # Add md5 auth entries if not already present
+    if ! grep -q "${DB_USER}" "$PG_HBA" 2>/dev/null; then
+        info "Adding password auth rules to pg_hba.conf..."
+        # Insert before the first existing rule
+        cp "$PG_HBA" "${PG_HBA}.bak.$(date +%s)"
+        {
+            echo "# CostOptimizer - password auth for ${DB_USER}"
+            echo "local   ${DB_NAME}   ${DB_USER}                          md5"
+            echo "host    ${DB_NAME}   ${DB_USER}   127.0.0.1/32           md5"
+            echo "host    ${DB_NAME}   ${DB_USER}   ::1/128                md5"
+            echo "host    ${DB_NAME}   ${DB_USER}   0.0.0.0/0             md5"
+        } | cat - "$PG_HBA" > "${PG_HBA}.tmp" && mv "${PG_HBA}.tmp" "$PG_HBA"
+        chown postgres:postgres "$PG_HBA"
+        chmod 640 "$PG_HBA"
+
+        # Reload PostgreSQL to apply pg_hba changes
+        systemctl reload postgresql
+        info "PostgreSQL reloaded with new auth rules"
+    fi
+
+    # Verify connection works
+    if PGPASSWORD="${DB_PASS}" psql -h 127.0.0.1 -U "${DB_USER}" -d "${DB_NAME}" -c "SELECT 1" >/dev/null 2>&1; then
+        info "Database connection verified successfully"
+    else
+        warn "Database connection test failed. Check pg_hba.conf and PostgreSQL logs."
+    fi
 }
 
 # ============================================================
