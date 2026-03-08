@@ -11,7 +11,13 @@ DOMAIN="www.strategybuilder.in"
 PROJECT_NAME="costoptimizer"
 DB_NAME="costoptimizer"
 DB_USER="costopt"
-DB_PASS="costopt_$(openssl rand -hex 8)"
+# Generate password once and persist it; reuse on subsequent runs
+PASS_FILE="${PROJECT_DIR}/.db_password"
+if [[ -f "$PASS_FILE" ]]; then
+    DB_PASS="$(cat "$PASS_FILE")"
+else
+    DB_PASS="costopt_$(openssl rand -hex 8)"
+fi
 
 # Auto-detect paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -76,6 +82,11 @@ setup_database() {
     fi
 
     sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};"
+
+    # Persist password for reuse
+    echo -n "$DB_PASS" > "$PASS_FILE"
+    chown "$RUN_USER:$RUN_GROUP" "$PASS_FILE"
+    chmod 600 "$PASS_FILE"
 
     # Ensure schema permissions
     sudo -u postgres psql -d "${DB_NAME}" -c "GRANT ALL ON SCHEMA public TO ${DB_USER};"

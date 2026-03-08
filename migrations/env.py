@@ -14,9 +14,13 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 from src.core.database import Base
+from src.core.config import get_settings
 from src.models import *  # noqa: F401,F403
 
 target_metadata = Base.metadata
+
+# Override alembic.ini URL with the app's configured database URL (from .env)
+config.set_main_option("sqlalchemy.url", get_settings().database_url)
 
 
 def run_migrations_offline():
